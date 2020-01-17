@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var hosts = make(map[string][]net.IP)
@@ -33,12 +34,20 @@ func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 			A:   hostIP,
 		})
 	}
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }
 
 func getInstances() {
 	newHosts := make(map[string][]net.IP)
-	result, err := ec2Svc.DescribeInstances(nil)
+	params := &ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("instance-state-name"),
+				Values: []*string{aws.String("running")},
+			},
+		},
+	}
+	result, err := ec2Svc.DescribeInstances(params)
 	if err != nil {
 		panic("Unable to get instances")
 	} else {
@@ -72,7 +81,20 @@ func main() {
 
 	ec2Svc = ec2.New(sess)
 
-	getInstances()
+	go getInstances()
+	getInstanceTicket := time.NewTicker(10 * time.Second)
+	getInstanceDone := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-getInstanceDone:
+				return
+			case _ = <-getInstanceTicket.C:
+				getInstances()
+			}
+		}
+	}()
 
 	go func() {
 		srv := &dns.Server{Addr: ":" + strconv.Itoa(*port), Net: "udp"}
