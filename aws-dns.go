@@ -18,6 +18,8 @@ import (
 
 var hosts = make(map[string][]net.IP)
 var ec2Svc *ec2.EC2
+var namespace *string
+var tag *string
 
 func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 	requestedHost := strings.Split(r.Question[0].Name, ".")[0]
@@ -38,7 +40,9 @@ func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func getInstances() {
+	checkTag := *tag
 	newHosts := make(map[string][]net.IP)
+
 	params := &ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -47,14 +51,16 @@ func getInstances() {
 			},
 		},
 	}
+
 	result, err := ec2Svc.DescribeInstances(params)
+
 	if err != nil {
 		panic("Unable to get instances")
 	} else {
 		for _, reservation := range result.Reservations {
 			for _, instance := range reservation.Instances {
 				for _, tag := range instance.Tags {
-					if *tag.Key == "Role" {
+					if *tag.Key == checkTag {
 						for _, networkInterface := range instance.NetworkInterfaces {
 							newHosts[*tag.Value] = append(newHosts[*tag.Value], net.ParseIP(*networkInterface.PrivateIpAddress))
 						}
@@ -69,11 +75,13 @@ func getInstances() {
 func main() {
 	port := flag.Int("port", 8053, "port to run on")
 	region := flag.String("region", "eu-north-1", "aws region to use")
+	namespace = flag.String("namespace", "services.internal.", "DNS namespace for services")
+	tag = flag.String("tag", "Role", "Tag to lookup for service detection")
 	flag.Parse()
 
 	hosts["test"] = append(hosts["test"], net.IPv4(1, 2, 3, 4))
 
-	dns.HandleFunc("services.internal.", handleRequest)
+	dns.HandleFunc(*namespace, handleRequest)
 
 	sess, _ := session.NewSession(&aws.Config{
 		Region: aws.String(*region)},
